@@ -7,3 +7,6 @@ tqdm>=4.60.0
 mutagen>=1.45.1
 ffmpeg-python>=0.2.0
 m3u8>=2.0.0
+flask>=2.0.1
+flask-wtf>=1.0.0
+flask-login>=0.6.0

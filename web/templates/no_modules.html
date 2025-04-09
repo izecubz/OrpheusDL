@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card border-warning">
+            <div class="card-header bg-warning text-dark">
+                <h4 class="mb-0"><i class="fas fa-exclamation-circle"></i> No Modules Installed</h4>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-warning">
+                    <h5>No modules are installed</h5>
+                    <p>OrpheusDL requires at least one module to be installed to function properly.</p>
+                    <p>Modules are the components that allow OrpheusDL to interact with different music services.</p>
+                </div>
+                
+                <h5>How to Install Modules</h5>
+                <p>To install modules, follow these steps:</p>
+                
+                <ol>
+                    <li>
+                        <strong>Create a modules directory</strong>
+                        <p>Make sure you have a <code>modules</code> directory in your OrpheusDL installation.</p>
+                        <pre><code>mkdir -p modules</code></pre>
+                    </li>
+                    
+                    <li>
+                        <strong>Clone module repositories</strong>
+                        <p>Clone the module repositories into the modules directory. For example:</p>
+                        <pre><code>cd modules
+git clone https://github.com/your-username/your-module.git</code></pre>
+                    </li>
+                    
+                    <li>
+                        <strong>Install module dependencies</strong>
+                        <p>Some modules may require additional dependencies. Check the module's documentation for details.</p>
+                    </li>
+                    
+                    <li>
+                        <strong>Configure modules</strong>
+                        <p>Create a <code>config/modules/your-module/settings.json</code> file with the necessary configuration.</p>
+                    </li>
+                </ol>
+                
+                <h5>Available Modules</h5>
+                <p>Here are some popular modules you can install:</p>
+                
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h5 class="card-title">Example Module</h5>
+                                <p class="card-text">A template module that demonstrates how to create your own module.</p>
+                                <a href="https://github.com/your-username/example-module" class="btn btn-sm btn-outline-primary" target="_blank">
+                                    <i class="fab fa-github"></i> View on GitHub
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="d-grid gap-2 mt-4">
+                    <a href="{{ url_for('index') }}" class="btn btn-primary">
+                        <i class="fas fa-home"></i> Return to Home
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

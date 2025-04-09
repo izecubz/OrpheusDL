@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="fas fa-download"></i> Download Music</h4>
+            </div>
+            <div class="card-body">
+                <form id="downloadForm" method="POST" action="{{ url_for('download') }}">
+                    {{ form.csrf_token }}
+                    <div class="mb-3">
+                        <label for="url" class="form-label">Music URL</label>
+                        {{ form.url(class="form-control", placeholder="Enter music URL (track, album, playlist, or artist)") }}
+                        {% if form.url.errors %}
+                            <div class="invalid-feedback d-block">
+                                {% for error in form.url.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="output_path" class="form-label">Output Path</label>
+                        {{ form.output_path(class="form-control", placeholder="Leave empty for default path") }}
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="lyrics_module" class="form-label">Lyrics Module</label>
+                                {{ form.lyrics_module(class="form-select") }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="covers_module" class="form-label">Covers Module</label>
+                                {{ form.covers_module(class="form-select") }}
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="mb-3">
+                                <label for="credits_module" class="form-label">Credits Module</label>
+                                {{ form.credits_module(class="form-select") }}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-primary" id="downloadButton">
+                            <i class="fas fa-download"></i> Start Download
+                        </button>
+                    </div>
+                </form>
+                
+                <!-- Download Progress Section (Hidden by default) -->
+                <div id="downloadProgress" class="mt-4" style="display: none;">
+                    <h5>Download Progress</h5>
+                    <div class="progress mb-3">
+                        <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" 
+                             style="width: 0%;" 
+                             id="progressBar">0%</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h6 class="mb-0">Log Messages</h6>
+                        </div>
+                        <div class="card-body">
+                            <div id="logMessages" style="height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.8rem;">
+                                <!-- Log messages will be displayed here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mt-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="fas fa-info-circle"></i> Supported Services</h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for module in modules %}
+                    <div class="col-md-4 mb-3">
+                        <div class="card h-100">
+                            <div class="card-body">
+                                <h5 class="card-title">{{ module|title }}</h5>
+                                <p class="card-text">
+                                    <small class="text-muted">
+                                        {% if module in orpheus.module_settings %}
+                                            {{ orpheus.module_settings[module].service_name }}
+                                        {% endif %}
+                                    </small>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const downloadForm = document.getElementById('downloadForm');
+    const downloadProgress = document.getElementById('downloadProgress');
+    const progressBar = document.getElementById('progressBar');
+    const logMessages = document.getElementById('logMessages');
+    const downloadButton = document.getElementById('downloadButton');
+    
+    let currentDownloadId = null;
+    let progressInterval = null;
+    
+    downloadForm.addEventListener('submit', function(e) {
+        e.preventDefault();
+        
+        // Disable the download button
+        downloadButton.disabled = true;
+        downloadButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting Download...';
+        
+        // Show the progress section
+        downloadProgress.style.display = 'block';
+        logMessages.innerHTML = '';
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+        
+        // Submit the form via AJAX
+        fetch('{{ url_for("download") }}', {
+            method: 'POST',
+            body: new FormData(downloadForm),
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.error) {
+                // Show error
+                logMessages.innerHTML += `<div class="text-danger">Error: ${data.error}</div>`;
+                downloadButton.disabled = false;
+                downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
+                return;
+            }
+            
+            // Start tracking progress
+            currentDownloadId = data.download_id;
+            startProgressTracking();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            logMessages.innerHTML += `<div class="text-danger">Error: ${error.message}</div>`;
+            downloadButton.disabled = false;
+            downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
+        });
+    });
+    
+    function startProgressTracking() {
+        // Clear any existing interval
+        if (progressInterval) {
+            clearInterval(progressInterval);
+        }
+        
+        // Start a new interval to check progress
+        progressInterval = setInterval(function() {
+            if (!currentDownloadId) return;
+            
+            fetch(`/progress/${currentDownloadId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        logMessages.innerHTML += `<div class="text-danger">Error: ${data.error}</div>`;
+                        clearInterval(progressInterval);
+                        downloadButton.disabled = false;
+                        downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
+                        return;
+                    }
+                    
+                    // Update progress bar
+                    progressBar.style.width = `${data.progress}%`;
+                    progressBar.textContent = `${data.progress}%`;
+                    
+                    // Update log messages
+                    if (data.messages && data.messages.length > 0) {
+                        logMessages.innerHTML = '';
+                        data.messages.forEach(message => {
+                            logMessages.innerHTML += `<div>${message}</div>`;
+                        });
+                        // Scroll to bottom
+                        logMessages.scrollTop = logMessages.scrollHeight;
+                    }
+                    
+                    // Check if download is completed or errored
+                    if (data.status === 'completed' || data.status === 'error') {
+                        clearInterval(progressInterval);
+                        downloadButton.disabled = false;
+                        downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
+                        
+                        if (data.status === 'completed') {
+                            progressBar.classList.remove('progress-bar-animated');
+                            progressBar.classList.add('bg-success');
+                        } else {
+                            progressBar.classList.remove('progress-bar-animated');
+                            progressBar.classList.add('bg-danger');
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching progress:', error);
+                    clearInterval(progressInterval);
+                    downloadButton.disabled = false;
+                    downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
+                });
+        }, 1000); // Check every second
+    }
+});
+</script>
+{% endblock %} 

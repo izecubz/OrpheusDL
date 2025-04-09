@@ -124,10 +124,12 @@ class Orpheus:
 
         # Module preparation (not loaded yet for performance purposes)
         os.makedirs('modules', exist_ok=True)
-        module_list = [module.lower() for module in os.listdir('modules') if os.path.exists(f'modules/{module}/interface.py')]
-        if not module_list or module_list == ['example']:
+        module_list = [module.lower() for module in os.listdir('modules') 
+                      if os.path.exists(f'modules/{module}/interface.py') 
+                      and module.lower() != 'example']  # Explicitly exclude example module
+        if not module_list:
             print('No modules are installed, quitting')
-            exit()
+            raise Exception('No modules are installed. Please install at least one module.')
         logging.debug('Orpheus: Modules detected: ' + ", ".join(module_list))
 
         for module in module_list:  # Loading module information into module_settings
