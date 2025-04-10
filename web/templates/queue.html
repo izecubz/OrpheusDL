@@ -3,38 +3,56 @@
 {% block title %}Download Queue - OrpheusDL{% endblock %}
 
 {% block content %}
-<div class="container mx-auto px-4 py-8">
-    <h1 class="text-3xl font-bold mb-8">Download Queue</h1>
-    
-    <!-- Active Downloads -->
-    <div class="mb-8">
-        <h2 class="text-xl font-semibold mb-4">Active Downloads</h2>
-        <div id="active-downloads" class="space-y-4">
-            <!-- Active downloads will be populated here -->
-            <div class="text-muted" id="no-active-downloads" style="display: none;">
-                No active downloads
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <!-- Active Downloads -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="fas fa-play-circle"></i> Active Downloads</h4>
+            </div>
+            <div class="card-body">
+                <div id="active-downloads" class="space-y-4">
+                    <!-- Active downloads will be populated here -->
+                </div>
+                <div class="text-center py-4" id="no-active-downloads">
+                    <i class="fas fa-pause-circle fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No Active Downloads</h5>
+                    <p class="text-muted small">There are no downloads currently in progress.</p>
+                </div>
             </div>
         </div>
-    </div>
-    
-    <!-- Queued Downloads -->
-    <div class="mb-8">
-        <h2 class="text-xl font-semibold mb-4">Queued Downloads</h2>
-        <div id="queued-downloads" class="space-y-4">
-            <!-- Queued downloads will be populated here -->
-            <div class="text-muted" id="no-queued-downloads" style="display: none;">
-                No queued downloads
+        
+        <!-- Queued Downloads -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="fas fa-clock"></i> Queued Downloads</h4>
+            </div>
+            <div class="card-body">
+                <div id="queued-downloads" class="space-y-4">
+                    <!-- Queued downloads will be populated here -->
+                </div>
+                <div class="text-center py-4" id="no-queued-downloads">
+                    <i class="fas fa-hourglass-start fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No Queued Downloads</h5>
+                    <p class="text-muted small">There are no downloads waiting in the queue.</p>
+                </div>
             </div>
         </div>
-    </div>
-    
-    <!-- Completed Downloads -->
-    <div id="completed-downloads" class="mt-8">
-        <h2 class="text-xl font-semibold mb-4">Completed Downloads</h2>
-        <div class="space-y-4">
-            <!-- Completed downloads will be shown here temporarily -->
-            <div class="text-muted" id="no-completed-downloads" style="display: none;">
-                No completed downloads
+        
+        <!-- Completed Downloads -->
+        <div class="card">
+            <div class="card-header">
+                <h4 class="mb-0"><i class="fas fa-check-circle"></i> Completed Downloads</h4>
+            </div>
+            <div class="card-body">
+                <div id="completed-downloads" class="space-y-4">
+                    <!-- Completed downloads will be shown here temporarily -->
+                </div>
+                <div class="text-center py-4" id="no-completed-downloads">
+                    <i class="fas fa-history fa-3x text-muted mb-3"></i>
+                    <h5 class="text-muted">No Completed Downloads</h5>
+                    <p class="text-muted small">There are no completed downloads to display.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -42,24 +60,30 @@
 
 <!-- Download Item Template -->
 <template id="download-item-template">
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
-        <div class="flex items-center justify-between">
-            <div class="flex-1">
-                <h3 class="text-lg font-medium text-gray-900 dark:text-white truncate"></h3>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1"></p>
-            </div>
-            <div class="flex items-center space-x-4">
-                <div class="w-32">
-                    <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full">
-                        <div class="progress-bar h-2 bg-blue-600 rounded-full" style="width: 0%"></div>
-                    </div>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 text-right progress-text">0%</p>
+    <div class="card mb-3">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="flex-grow-1">
+                    <h5 class="card-title mb-1 download-title"></h5>
+                    <p class="card-text text-muted small download-info"></p>
                 </div>
-                <button class="cancel-btn text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                    </svg>
-                </button>
+                <div class="d-flex align-items-center">
+                    <div class="me-3" style="width: 150px;">
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" 
+                                 role="progressbar" 
+                                 style="width: 0%;" 
+                                 aria-valuenow="0" 
+                                 aria-valuemin="0" 
+                                 aria-valuemax="100">
+                                <span class="progress-text">0%</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="btn btn-outline-danger btn-sm cancel-btn">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -67,16 +91,16 @@
 
 <!-- Completed Download Template -->
 <template id="completed-download-template">
-    <div class="bg-green-50 dark:bg-green-900 rounded-lg shadow-md p-4 completed-download">
-        <div class="flex items-center justify-between">
-            <div class="flex-1">
-                <h3 class="text-lg font-medium text-green-800 dark:text-green-100 truncate"></h3>
-                <p class="text-sm text-green-600 dark:text-green-300 mt-1"></p>
-            </div>
-            <div class="flex items-center">
-                <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
+    <div class="card mb-3 border-success completed-download">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center">
+                <div class="flex-grow-1">
+                    <h5 class="card-title mb-1 text-success completed-title"></h5>
+                    <p class="card-text text-success small completed-info"></p>
+                </div>
+                <div>
+                    <i class="fas fa-check-circle text-success"></i>
+                </div>
             </div>
         </div>
     </div>
@@ -89,7 +113,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     const activeDownloadsContainer = document.getElementById('active-downloads');
     const queuedDownloadsContainer = document.getElementById('queued-downloads');
-    const completedDownloadsContainer = document.getElementById('completed-downloads').querySelector('div');
+    const completedDownloadsContainer = document.getElementById('completed-downloads');
     const downloadTemplate = document.getElementById('download-item-template');
     const completedTemplate = document.getElementById('completed-download-template');
     
@@ -118,10 +142,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const container = template.querySelector('div');
         
         // Set download title and info
-        const title = container.querySelector('h3');
+        const title = container.querySelector('.download-title');
         title.textContent = download.filename || 'Unknown File';
         
-        const info = container.querySelector('p');
+        const info = container.querySelector('.download-info');
         info.textContent = `${formatBytes(download.size || 0)} • ${formatTime(download.timestamp)}`;
         
         // Set progress
@@ -129,6 +153,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const progressText = container.querySelector('.progress-text');
         const progress = download.progress || 0;
         progressBar.style.width = `${progress}%`;
+        progressBar.setAttribute('aria-valuenow', progress);
         progressText.textContent = `${progress}%`;
         
         // Set up cancel button
@@ -166,10 +191,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const container = template.querySelector('div');
         
         // Set download title and info
-        const title = container.querySelector('h3');
+        const title = container.querySelector('.completed-title');
         title.textContent = download.filename || 'Unknown File';
         
-        const info = container.querySelector('p');
+        const info = container.querySelector('.completed-info');
         info.textContent = `Completed at ${formatTime(download.timestamp)}`;
         
         // Add to completed downloads container

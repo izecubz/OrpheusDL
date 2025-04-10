@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, send_file, flash, redirect, url_for, session
 from flask_wtf import FlaskForm
 from flask_wtf.csrf import CSRFProtect
-from wtforms import StringField, SelectField, BooleanField
+from wtforms import StringField, SelectField, BooleanField, SubmitField
 from wtforms.validators import DataRequired, URL
 import os
 import json
@@ -44,7 +44,8 @@ except ImportError as e:
     traceback.print_exc()
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'orpheusdl-web-secret-key-2025'  # Use a consistent secret key
+# load WEB_SECRET from environment variable
+app.config['SECRET_KEY'] = os.environ.get('WEB_SECRET', 'orpheusdl-web-secret-key-2025')
 csrf = CSRFProtect(app)  # Initialize CSRF protection
 
 # Global variables for tracking download progress
@@ -165,14 +166,15 @@ class DownloadForm(FlaskForm):
     credits_module = SelectField('Credits Module', choices=[('default', 'Default')])
 
 class SearchForm(FlaskForm):
-    module = SelectField('Module', choices=[])
+    module = SelectField('Module', validators=[DataRequired()])
     query_type = SelectField('Type', choices=[
         ('track', 'Track'),
-        ('album', 'Album'),
+        ('album', 'Album'), 
         ('playlist', 'Playlist'),
         ('artist', 'Artist')
-    ])
+    ], validators=[DataRequired()])
     query = StringField('Query', validators=[DataRequired()])
+    submit = SubmitField('Search')
 
 # Update form choices if Orpheus is initialized
 if orpheus_instance and hasattr(orpheus_instance, 'module_list') and orpheus_instance.module_list:
@@ -422,30 +424,31 @@ def search():
         return render_template('no_modules.html')
     
     form = SearchForm()
+    form.module.choices = [(module, module) for module in orpheus_instance.module_list]
+    
     if form.validate_on_submit():
         try:
             module = orpheus_instance.load_module(form.module.data)
-            items = module.search(form.query_type.data, form.query.data, 
-                                limit=orpheus_instance.settings['global']['general']['search_limit'])
+            # Convert query type to lowercase before passing to module
+            query_type = DownloadTypeEnum[form.query_type.data.lower()]
+            items = module.search(query_type, form.query.data, limit=orpheus_instance.settings['global']['general']['search_limit'])
             
             results = []
             for item in items:
                 result = {
                     'name': item.name,
-                    'artists': item.artists if isinstance(item.artists, list) else [item.artists],
-                    'duration': beauty_format_seconds(item.duration) if item.duration else None,
+                    'artists': item.artists,
                     'year': item.year,
                     'explicit': item.explicit,
-                    'additional': item.additional,
-                    'result_id': item.result_id,
-                    'extra_kwargs': item.extra_kwargs
+                    'duration': beauty_format_seconds(item.duration) if item.duration else None,
+                    'additional': item.additional
                 }
                 results.append(result)
             
             return jsonify(results)
         except Exception as e:
-            return jsonify({'error': str(e)}), 500
-    
+            return jsonify({'error': str(e)}), 400
+            
     return render_template('search.html', form=form)
 
 @app.route('/download', methods=['POST'])

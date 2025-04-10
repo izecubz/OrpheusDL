@@ -75,6 +75,11 @@ $(document).ready(function() {
                 const resultsList = $('#resultsList');
                 resultsList.empty();
                 
+                if (response.error) {
+                    alert('Error: ' + response.error);
+                    return;
+                }
+                
                 response.forEach(function(item, index) {
                     const additionalDetails = [];
                     if (item.explicit) additionalDetails.push('[E]');
