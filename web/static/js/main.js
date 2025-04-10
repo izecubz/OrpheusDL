@@ -145,83 +145,86 @@ function initSettingsPage() {
         $(this).tab('show');
     });
 
-    // Handle settings form submission
-    $('#saveSettings').on('click', function() {
-        const formData = {};
-        
-        // Process all form inputs
-        $('#settingsForm input, #settingsForm select').each(function() {
-            const name = $(this).attr('name');
-            if (!name) return;
+    // Only initialize settings editing if the save button exists
+    if ($('#saveSettings').length) {
+        // Handle settings form submission
+        $('#saveSettings').on('click', function() {
+            const formData = {};
             
-            const parts = name.split('.');
-            let current = formData;
-            
-            // Build the nested structure
-            for (let i = 0; i < parts.length - 1; i++) {
-                if (!current[parts[i]]) {
-                    current[parts[i]] = {};
+            // Process all form inputs
+            $('#settingsForm input, #settingsForm select').each(function() {
+                const name = $(this).attr('name');
+                if (!name) return;
+                
+                const parts = name.split('.');
+                let current = formData;
+                
+                // Build the nested structure
+                for (let i = 0; i < parts.length - 1; i++) {
+                    if (!current[parts[i]]) {
+                        current[parts[i]] = {};
+                    }
+                    current = current[parts[i]];
                 }
-                current = current[parts[i]];
-            }
-            
-            // Handle different input types
-            if ($(this).attr('type') === 'checkbox') {
-                current[parts[parts.length - 1]] = $(this).prop('checked');
-            } else if ($(this).attr('type') === 'number') {
-                current[parts[parts.length - 1]] = parseInt($(this).val(), 10);
-            } else {
-                current[parts[parts.length - 1]] = $(this).val();
-            }
-        });
-
-        // Send settings to server
-        $.ajax({
-            url: '/api/settings',
-            method: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(formData),
-            success: function(response) {
-                if (response.success) {
-                    showAlert('success', 'Settings saved successfully');
-                    $('#restartModule').prop('disabled', false);
+                
+                // Handle different input types
+                if ($(this).attr('type') === 'checkbox') {
+                    current[parts[parts.length - 1]] = $(this).prop('checked');
+                } else if ($(this).attr('type') === 'number') {
+                    current[parts[parts.length - 1]] = parseInt($(this).val(), 10);
                 } else {
-                    showAlert('danger', 'Error saving settings: ' + response.error);
+                    current[parts[parts.length - 1]] = $(this).val();
                 }
-            },
-            error: function(xhr) {
-                showAlert('danger', 'Error saving settings: ' + xhr.responseText);
-            }
-        });
-    });
+            });
 
-    // Handle restart module button
-    $('#restartModule').on('click', function() {
-        $('#restartModal').modal('show');
-    });
-
-    // Handle restart confirmation
-    $('#confirmRestart').on('click', function() {
-        $.ajax({
-            url: '/api/restart',
-            method: 'POST',
-            success: function(response) {
-                if (response.success) {
-                    showAlert('success', 'Module restarted successfully');
-                    $('#restartModule').prop('disabled', true);
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 2000);
-                } else {
-                    showAlert('danger', 'Error restarting module: ' + response.error);
+            // Send settings to server
+            $.ajax({
+                url: '/api/settings',
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(formData),
+                success: function(response) {
+                    if (response.success) {
+                        showAlert('success', 'Settings saved successfully');
+                        $('#restartModule').prop('disabled', false);
+                    } else {
+                        showAlert('danger', 'Error saving settings: ' + response.error);
+                    }
+                },
+                error: function(xhr) {
+                    showAlert('danger', 'Error saving settings: ' + xhr.responseText);
                 }
-            },
-            error: function(xhr) {
-                showAlert('danger', 'Error restarting module: ' + xhr.responseText);
-            }
+            });
         });
-        $('#restartModal').modal('hide');
-    });
+
+        // Handle restart module button
+        $('#restartModule').on('click', function() {
+            $('#restartModal').modal('show');
+        });
+
+        // Handle restart confirmation
+        $('#confirmRestart').on('click', function() {
+            $.ajax({
+                url: '/api/restart',
+                method: 'POST',
+                success: function(response) {
+                    if (response.success) {
+                        showAlert('success', 'Module restarted successfully');
+                        $('#restartModule').prop('disabled', true);
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 2000);
+                    } else {
+                        showAlert('danger', 'Error restarting module: ' + response.error);
+                    }
+                },
+                error: function(xhr) {
+                    showAlert('danger', 'Error restarting module: ' + xhr.responseText);
+                }
+            });
+            $('#restartModal').modal('hide');
+        });
+    }
 }
 
 // Document ready handler

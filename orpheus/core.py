@@ -5,8 +5,6 @@ from orpheus.music_downloader import Downloader
 from utils.models import *
 from utils.utils import *
 from utils.exceptions import *
-from utils.progress import ProgressReporter
-from utils.events import EventType, DownloadEvent, event_manager
 
 os.environ['CURL_CA_BUNDLE'] = ''  # Hack to disable SSL errors for requests module for easier debugging
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)  # Make SSL warnings hidden
@@ -107,22 +105,7 @@ class Orpheus:
         self.session_storage_location = os.path.join(self.data_folder_base, 'loginstorage.bin')
 
         os.makedirs('config', exist_ok=True)
-        
-        # Try to load settings, create default if file doesn't exist or is corrupted
-        try:
-            if os.path.exists(self.settings_location) and os.path.getsize(self.settings_location) > 0:
-                self.settings = json.loads(open(self.settings_location, 'r').read())
-            else:
-                # Create default settings file
-                self.settings = {"global": self.default_global_settings, "extensions": {}, "modules": {}}
-                with open(self.settings_location, 'w') as f:
-                    json.dump(self.settings, f, indent=4)
-        except (json.JSONDecodeError, IOError) as e:
-            # If there's an error reading the file, create a new one with defaults
-            logger.warning(f"Error reading settings file: {e}. Creating new settings file with defaults.")
-            self.settings = {"global": self.default_global_settings, "extensions": {}, "modules": {}}
-            with open(self.settings_location, 'w') as f:
-                json.dump(self.settings, f, indent=4)
+        self.settings = json.loads(open(self.settings_location, 'r').read()) if os.path.exists(self.settings_location) else {}
 
         try:
             if self.settings['global']['advanced']['debug_mode']: logging.basicConfig(level=logging.DEBUG)
@@ -141,12 +124,10 @@ class Orpheus:
 
         # Module preparation (not loaded yet for performance purposes)
         os.makedirs('modules', exist_ok=True)
-        module_list = [module.lower() for module in os.listdir('modules') 
-                      if os.path.exists(f'modules/{module}/interface.py') 
-                      and module.lower() != 'example']  # Explicitly exclude example module
-        if not module_list:
+        module_list = [module.lower() for module in os.listdir('modules') if os.path.exists(f'modules/{module}/interface.py')]
+        if not module_list or module_list == ['example']:
             print('No modules are installed, quitting')
-            raise Exception('No modules are installed. Please install at least one module.')
+            exit()
         logging.debug('Orpheus: Modules detected: ' + ", ".join(module_list))
 
         for module in module_list:  # Loading module information into module_settings
@@ -194,8 +175,6 @@ class Orpheus:
 
         self.module_controls = {'module_list': self.module_list, 'module_settings': self.module_settings,
             'loaded_modules': self.loaded_modules, 'module_loader': self.load_module}
-
-        self.progress_reporter = None
 
     def load_module(self, module: str):
         module = module.lower()
@@ -375,118 +354,54 @@ class Orpheus:
             print('New settings detected, or the configuration has been reset. Please update settings.json')
             exit()
 
-    def set_progress_reporter(self, download_id: str):
-        """Set the progress reporter for the current download."""
-        self.progress_reporter = ProgressReporter(download_id)
-        return self.progress_reporter
-    
-    def report_progress(self, current: int, total: int, message: str = None):
-        """Report progress for the current download."""
-        if self.progress_reporter:
-            self.progress_reporter.report_progress(current, total, message)
-    
-    def report_message(self, message: str, level: int = 0):
-        """Report a message for the current download."""
-        if self.progress_reporter:
-            self.progress_reporter.report_message(message, level)
-    
-    def report_status(self, status: str):
-        """Report a status change for the current download."""
-        if self.progress_reporter:
-            self.progress_reporter.report_status(status)
-    
-    def report_error(self, error: str):
-        """Report an error for the current download."""
-        if self.progress_reporter:
-            self.progress_reporter.report_error(error)
-    
-    def report_complete(self):
-        """Report completion of the current download."""
-        if self.progress_reporter:
-            self.progress_reporter.report_complete()
-
-
-# Configure logging
-logger = logging.getLogger('orpheus-core')
 
 def orpheus_core_download(orpheus_session: Orpheus, media_to_download, third_party_modules, separate_download_module, output_path):
-    """Download media using the Orpheus core."""
-    logger.debug("Starting orpheus_core_download")
-    logger.debug(f"Media to download: {media_to_download}")
-    logger.debug(f"Third-party modules: {third_party_modules}")
-    logger.debug(f"Separate download module: {separate_download_module}")
-    logger.debug(f"Output path: {output_path}")
-    
-    try:
-        # Initialize download
-        logger.debug("Initializing download")
-        orpheus_session.report_status("initializing")
-        orpheus_session.report_message("Initializing download...")
-        
-        # Process each service
-        total_items = sum(len(items) for items in media_to_download.values())
-        current_item = 0
-        
-        logger.debug(f"Total items to download: {total_items}")
-        
-        for service_name, items in media_to_download.items():
-            logger.debug(f"Processing service: {service_name}")
-            logger.debug(f"Items for this service: {items}")
-            
-            # Load the module if not already loaded
-            if service_name not in orpheus_session.loaded_modules:
-                logger.debug(f"Loading module: {service_name}")
-                orpheus_session.report_message(f"Loading {service_name} module...")
-                orpheus_session.load_module(service_name)
-            
-            # Get the module interface
-            module_interface = orpheus_session.loaded_modules[service_name]
-            logger.debug(f"Module interface loaded: {module_interface}")
-            
-            # Process each item
-            for item in items:
-                current_item += 1
-                logger.debug(f"Processing item {current_item} of {total_items}: {item}")
-                orpheus_session.report_progress(current_item, total_items, f"Processing item {current_item} of {total_items}")
-                
-                try:
-                    # The item is already a MediaIdentification object, no need to identify it
-                    logger.debug(f"Processing media: {item}")
-                    orpheus_session.report_message(f"Processing {item}...")
-                    media_identification = item
-                    
-                    if not media_identification:
-                        logger.error(f"Failed to process {item}")
-                        orpheus_session.report_error(f"Failed to process {item}")
-                        continue
-                    
-                    logger.debug(f"Media to process: {media_identification}")
-                    
-                    # Download the media
-                    logger.debug(f"Downloading media: {media_identification.media_id}")
-                    orpheus_session.report_message(f"Downloading {media_identification.media_type.name} with ID {media_identification.media_id}...")
-                    module_interface.download(
-                        media_identification,
-                        third_party_modules,
-                        separate_download_module,
-                        output_path
-                    )
-                    
-                    logger.debug(f"Successfully downloaded: {media_identification.media_id}")
-                    orpheus_session.report_message(f"Successfully downloaded {media_identification.media_type.name} with ID {media_identification.media_id}")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing {item}: {str(e)}", exc_info=True)
-                    orpheus_session.report_error(f"Error processing {item}: {str(e)}")
-                    continue
-        
-        # Report completion
-        logger.debug("All downloads completed successfully")
-        orpheus_session.report_status("completed")
-        orpheus_session.report_message("All downloads completed successfully")
-        orpheus_session.report_complete()
-        
-    except Exception as e:
-        logger.error(f"Download failed: {str(e)}", exc_info=True)
-        orpheus_session.report_error(f"Download failed: {str(e)}")
-        raise
+    downloader = Downloader(orpheus_session.settings['global'], orpheus_session.module_controls, oprinter, output_path)
+    os.makedirs('temp', exist_ok=True)
+
+    for mainmodule, items in media_to_download.items():
+        for media in items:
+            if ModuleModes.download not in orpheus_session.module_settings[mainmodule].module_supported_modes:
+                raise Exception(f'{mainmodule} does not support track downloading') # TODO: replace with ModuleDoesNotSupportAbility
+
+            # Load and prepare module
+            music = orpheus_session.load_module(mainmodule)
+            downloader.service = music
+            downloader.service_name = mainmodule
+
+            for i in third_party_modules:
+                moduleselected = third_party_modules[i]
+                if moduleselected:
+                    if moduleselected not in orpheus_session.module_list:
+                        raise Exception(f'{moduleselected} does not exist in modules.') # TODO: replace with InvalidModuleError
+                    elif i not in orpheus_session.module_settings[moduleselected].module_supported_modes:
+                        raise Exception(f'Module {moduleselected} does not support {i}') # TODO: replace with ModuleDoesNotSupportAbility
+                    else:
+                        # If all checks pass, load up the selected module
+                        orpheus_session.load_module(moduleselected)
+
+            downloader.third_party_modules = third_party_modules
+
+            mediatype = media.media_type
+            media_id = media.media_id
+
+            downloader.download_mode = mediatype
+
+            # Mode to download playlist using other service
+            if separate_download_module != 'default' and separate_download_module != mainmodule:
+                if mediatype is not DownloadTypeEnum.playlist:
+                    raise Exception('The separate download module option is only for playlists.') # TODO: replace with ModuleDoesNotSupportAbility
+                downloader.download_playlist(media_id, custom_module=separate_download_module, extra_kwargs=media.extra_kwargs)
+            else:  # Standard download modes
+                if mediatype is DownloadTypeEnum.album:
+                    downloader.download_album(media_id, extra_kwargs=media.extra_kwargs)
+                elif mediatype is DownloadTypeEnum.track:
+                    downloader.download_track(media_id, extra_kwargs=media.extra_kwargs)
+                elif mediatype is DownloadTypeEnum.playlist:
+                    downloader.download_playlist(media_id, extra_kwargs=media.extra_kwargs)
+                elif mediatype is DownloadTypeEnum.artist:
+                    downloader.download_artist(media_id, extra_kwargs=media.extra_kwargs)
+                else:
+                    raise Exception(f'\tUnknown media type "{mediatype}"')
+
+    if os.path.exists('temp'): shutil.rmtree('temp')

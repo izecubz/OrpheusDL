@@ -9,8 +9,12 @@
             </div>
             <div class="card-body">
                 <p class="mb-0">
+                    {% if enable_editing %}
                     Even though the settings are able to be modified through the web interface, it is recommended to modify the settings through the command line.
                     After modifying the settings, you will need to restart the docker container for the changes to take effect.
+                    {% else %}
+                    Settings editing is currently disabled. To enable editing, set the ENABLE_EDITING environment variable to 'true'.
+                    {% endif %}
                 </p>
                 <ul class="mt-2">
                     <li>Global settings: <code>config/settings.json</code></li>
@@ -20,6 +24,7 @@
         <div class="card mt-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h4 class="mb-0"><i class="fas fa-cog"></i> Settings</h4>
+                {% if enable_editing %}
                 <div>
                     <button id="saveSettings" class="btn btn-primary">
                         <i class="fas fa-save"></i> Save Changes
@@ -28,6 +33,7 @@
                         <i class="fas fa-sync"></i> Restart Module
                     </button>
                 </div>
+                {% endif %}
             </div>
             <div class="card-body">
                 <form id="settingsForm">
@@ -51,11 +57,11 @@
                                     <h5>Download Settings</h5>
                                     <div class="mb-3">
                                         <label class="form-label">Download Path</label>
-                                        <input type="text" class="form-control" name="global.general.download_path" value="{{ settings.global.general.download_path }}">
+                                        <input type="text" class="form-control" name="global.general.download_path" value="{{ settings.global.general.download_path }}" {% if not enable_editing %}readonly{% endif %}>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Download Quality</label>
-                                        <select class="form-select" name="global.general.download_quality">
+                                        <select class="form-select" name="global.general.download_quality" {% if not enable_editing %}disabled{% endif %}>
                                             <option value="hifi" {% if settings.global.general.download_quality == 'hifi' %}selected{% endif %}>HiFi</option>
                                             <option value="lossless" {% if settings.global.general.download_quality == 'lossless' %}selected{% endif %}>Lossless</option>
                                             <option value="high" {% if settings.global.general.download_quality == 'high' %}selected{% endif %}>High</option>
@@ -63,18 +69,18 @@
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Search Limit</label>
-                                        <input type="number" class="form-control" name="global.general.search_limit" value="{{ settings.global.general.search_limit }}">
+                                        <input type="number" class="form-control" name="global.general.search_limit" value="{{ settings.global.general.search_limit }}" {% if not enable_editing %}readonly{% endif %}>
                                     </div>
                                 </div>
                                 <div class="col-md-6">
                                     <h5>Formatting</h5>
                                     <div class="mb-3">
                                         <label class="form-label">Album Format</label>
-                                        <input type="text" class="form-control" name="global.formatting.album_format" value="{{ settings.global.formatting.album_format }}">
+                                        <input type="text" class="form-control" name="global.formatting.album_format" value="{{ settings.global.formatting.album_format }}" {% if not enable_editing %}readonly{% endif %}>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Track Filename Format</label>
-                                        <input type="text" class="form-control" name="global.formatting.track_filename_format" value="{{ settings.global.formatting.track_filename_format }}">
+                                        <input type="text" class="form-control" name="global.formatting.track_filename_format" value="{{ settings.global.formatting.track_filename_format }}" {% if not enable_editing %}readonly{% endif %}>
                                     </div>
                                 </div>
                             </div>
@@ -86,19 +92,53 @@
                                 {% for module in modules %}
                                 <div class="col-md-4 mb-3">
                                     <div class="card h-100">
-                                        <div class="card-header">
+                                        <div class="card-header d-flex justify-content-between align-items-center">
                                             <h5 class="mb-0">{{ module|title }}</h5>
+                                            {% if module in module_status %}
+                                                {% if module_status[module].is_valid %}
+                                                    <span class="badge bg-success"><i class="fas fa-check"></i> Ready</span>
+                                                {% else %}
+                                                    <span class="badge bg-danger" data-bs-toggle="tooltip" title="Missing: {{ module_status[module].missing_fields|join(', ') }}">
+                                                        <i class="fas fa-exclamation-triangle"></i> Missing Credentials
+                                                    </span>
+                                                {% endif %}
+                                            {% endif %}
                                         </div>
                                         <div class="card-body">
                                             {% if module in settings.modules %}
                                                 {% for key, value in settings.modules[module].items() %}
                                                     <div class="mb-2">
-                                                        <label class="form-label">{{ key|title }}</label>
-                                                        <input type="text" class="form-control" name="modules.{{ module }}.{{ key }}" value="{{ value }}">
+                                                        <label class="form-label">
+                                                            {{ key|title }}
+                                                            {% if module in module_status and not module_status[module].is_valid and key in module_status[module].missing_fields %}
+                                                                <span class="text-danger">*</span>
+                                                            {% endif %}
+                                                        </label>
+                                                        <input type="text" class="form-control" name="modules.{{ module }}.{{ key }}" value="{{ value }}" {% if not enable_editing %}readonly{% endif %}>
                                                     </div>
                                                 {% endfor %}
                                             {% else %}
                                                 <p class="text-muted">No settings available</p>
+                                            {% endif %}
+                                            
+                                            {% if module in module_status and not module_status[module].is_valid %}
+                                                <div class="alert alert-warning mt-3">
+                                                    <h6 class="alert-heading"><i class="fas fa-exclamation-triangle"></i> Missing Credentials</h6>
+                                                    <p class="mb-0">This module requires the following credentials:</p>
+                                                    <ul class="mb-0">
+                                                        {% for field in module_status[module].missing_fields %}
+                                                            <li>{{ field|title }}</li>
+                                                        {% endfor %}
+                                                    </ul>
+                                                    {% if module_status[module].errors %}
+                                                        <p class="mt-2 mb-0">Additional errors:</p>
+                                                        <ul class="mb-0">
+                                                            {% for error in module_status[module].errors %}
+                                                                <li>{{ error }}</li>
+                                                            {% endfor %}
+                                                        </ul>
+                                                    {% endif %}
+                                                </div>
                                             {% endif %}
                                         </div>
                                     </div>
@@ -115,13 +155,13 @@
                                     <div class="mb-3">
                                         <label class="form-label">Proprietary Codecs</label>
                                         <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" name="global.advanced.proprietary_codecs" {% if settings.global.advanced.proprietary_codecs %}checked{% endif %}>
+                                            <input class="form-check-input" type="checkbox" name="global.advanced.proprietary_codecs" {% if settings.global.advanced.proprietary_codecs %}checked{% endif %} {% if not enable_editing %}disabled{% endif %}>
                                         </div>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Spatial Codecs</label>
                                         <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" name="global.advanced.spatial_codecs" {% if settings.global.advanced.spatial_codecs %}checked{% endif %}>
+                                            <input class="form-check-input" type="checkbox" name="global.advanced.spatial_codecs" {% if settings.global.advanced.spatial_codecs %}checked{% endif %} {% if not enable_editing %}disabled{% endif %}>
                                         </div>
                                     </div>
                                 </div>
@@ -130,13 +170,13 @@
                                     <div class="mb-3">
                                         <label class="form-label">Debug Mode</label>
                                         <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" name="global.advanced.debug_mode" {% if settings.global.advanced.debug_mode %}checked{% endif %}>
+                                            <input class="form-check-input" type="checkbox" name="global.advanced.debug_mode" {% if settings.global.advanced.debug_mode %}checked{% endif %} {% if not enable_editing %}disabled{% endif %}>
                                         </div>
                                     </div>
                                     <div class="mb-3">
                                         <label class="form-label">Disable Subscription Checks</label>
                                         <div class="form-check form-switch">
-                                            <input class="form-check-input" type="checkbox" name="global.advanced.disable_subscription_checks" {% if settings.global.advanced.disable_subscription_checks %}checked{% endif %}>
+                                            <input class="form-check-input" type="checkbox" name="global.advanced.disable_subscription_checks" {% if settings.global.advanced.disable_subscription_checks %}checked{% endif %} {% if not enable_editing %}disabled{% endif %}>
                                         </div>
                                     </div>
                                 </div>
@@ -149,6 +189,7 @@
     </div>
 </div>
 
+{% if enable_editing %}
 <!-- Restart Confirmation Modal -->
 <div class="modal fade" id="restartModal" tabindex="-1">
     <div class="modal-dialog">
@@ -167,4 +208,5 @@
         </div>
     </div>
 </div>
+{% endif %}
 {% endblock %} 

@@ -14,6 +14,7 @@ import re
 from utils.events import event_manager, EventType
 from utils.progress import ProgressReporter
 import logging
+from utils.module_checker import ModuleCheckerRegistry, ModuleCheckResult
 
 # Configure logging
 logging.basicConfig(
@@ -305,7 +306,68 @@ def run_download(download_id, orpheus_instance, media_to_download, tpm, separate
     logger.debug(f"Separate download module: {separate_download_module}")
     logger.debug(f"Output path: {output_path}")
     
+    # Log module settings in detail
+    logger.debug("=== Module Settings ===")
+    for service_name in media_to_download:
+        logger.debug(f"Checking settings for service: {service_name}")
+        if service_name in orpheus_instance.settings.get('modules', {}):
+            module_settings = orpheus_instance.settings['modules'][service_name]
+            logger.debug(f"Module settings for {service_name}:")
+            for key, value in module_settings.items():
+                # Mask sensitive values
+                masked_value = "********" if key in ['password', 'client_secret', 'api_key'] else value
+                logger.debug(f"  {key}: {masked_value}")
+        else:
+            logger.warning(f"No settings found for module {service_name}")
+    logger.debug("=== End Module Settings ===")
+    
+    # Log module interface details
+    logger.debug("=== Module Interface Details ===")
+    for service_name in media_to_download:
+        try:
+            module = orpheus_instance.load_module(service_name)
+            logger.debug(f"Module interface for {service_name}:")
+            logger.debug(f"  Type: {type(module)}")
+            logger.debug(f"  Available methods: {[method for method in dir(module) if not method.startswith('_')]}")
+            logger.debug(f"  Has download method: {'download' in dir(module)}")
+            logger.debug(f"  Has download_album method: {'download_album' in dir(module)}")
+            logger.debug(f"  Has download_track method: {'download_track' in dir(module)}")
+            logger.debug(f"  Has download_playlist method: {'download_playlist' in dir(module)}")
+            logger.debug(f"  Has download_artist method: {'download_artist' in dir(module)}")
+        except Exception as e:
+            logger.error(f"Error inspecting module {service_name}: {str(e)}")
+    logger.debug("=== End Module Interface Details ===")
+    
+    # Set timeout for the download (5 minutes)
+    download_timeout = 300  # 5 minutes in seconds
+    start_time = time.time()
+    
     try:
+        # Check module credentials before starting the download
+        for service_name in media_to_download:
+            if service_name in orpheus_instance.settings.get('modules', {}):
+                module_settings = orpheus_instance.settings['modules'][service_name]
+                logger.debug(f"Checking credentials for {service_name}")
+                check_result = ModuleCheckerRegistry.check_module(service_name, module_settings)
+                
+                if not check_result:
+                    error_message = f"Missing required credentials for {service_name}. Please check your settings."
+                    if check_result.missing_fields:
+                        error_message = f"Missing required fields for {service_name}: {', '.join(check_result.missing_fields)}. Please check your settings."
+                    if check_result.errors:
+                        error_message += f" Errors: {', '.join(check_result.errors)}"
+                    
+                    logger.error(error_message)
+                    orpheus_instance.report_error(error_message)
+                    download_status[download_id] = "error"
+                    if download_id not in download_messages:
+                        download_messages[download_id] = []
+                    download_messages[download_id].append(f"Error: {error_message}")
+                    download_progress[download_id] = 0
+                    return
+                else:
+                    logger.debug(f"Credentials check passed for {service_name}")
+        
         # Set up progress reporter
         logger.debug(f"Setting up progress reporter for download ID: {download_id}")
         progress_reporter = orpheus_instance.set_progress_reporter(download_id)
@@ -332,6 +394,8 @@ def run_download(download_id, orpheus_instance, media_to_download, tpm, separate
                     download_messages[download_id] = []
                 download_messages[download_id].append(f"Error: {event.data['error']}")
                 logger.error(f"Error for download ID {download_id}: {event.data['error']}")
+                # Ensure we mark the download as failed
+                download_progress[download_id] = 0
             elif event.event_type == EventType.COMPLETE:
                 download_status[download_id] = "completed"
                 download_progress[download_id] = 100
@@ -344,20 +408,49 @@ def run_download(download_id, orpheus_instance, media_to_download, tpm, separate
         # Start the download
         logger.debug(f"Starting download for ID: {download_id}")
         orpheus_instance.report_status("starting")
-        orpheus_core_download(orpheus_instance, media_to_download, tpm, separate_download_module, output_path)
         
+        # Create a thread for the download
+        download_thread = threading.Thread(
+            target=orpheus_core_download,
+            args=(orpheus_instance, media_to_download, tpm, separate_download_module, output_path)
+        )
+        download_thread.daemon = True
+        download_thread.start()
+        
+        # Wait for the download to complete or timeout
+        while download_thread.is_alive():
+            # Check if we've exceeded the timeout
+            if time.time() - start_time > download_timeout:
+                logger.error(f"Download timed out for ID {download_id} after {download_timeout} seconds")
+                orpheus_instance.report_error(f"Download timed out after {download_timeout} seconds")
+                download_status[download_id] = "error"
+                if download_id not in download_messages:
+                    download_messages[download_id] = []
+                download_messages[download_id].append(f"Error: Download timed out after {download_timeout} seconds")
+                download_progress[download_id] = 0
+                break
+            
+            # Sleep for a short time to avoid busy waiting
+            time.sleep(1)
+        
+    except Exception as e:
+        logger.error(f"Exception in run_download for ID {download_id}: {str(e)}", exc_info=True)
+        # Ensure error is reported even if the exception occurs before event handling is set up
+        download_status[download_id] = "error"
+        if download_id not in download_messages:
+            download_messages[download_id] = []
+        download_messages[download_id].append(f"Critical error: {str(e)}")
+        download_progress[download_id] = 0
+        orpheus_instance.report_error(str(e))
+        print(f"Download error: {str(e)}")
+        traceback.print_exc()
+    finally:
         # Clean up
         logger.debug(f"Cleaning up for download ID: {download_id}")
         for event_type in EventType:
             event_manager.unsubscribe(download_id, event_type, handle_event)
         event_manager.clear_events(download_id)
         
-    except Exception as e:
-        logger.error(f"Exception in run_download for ID {download_id}: {str(e)}", exc_info=True)
-        orpheus_instance.report_error(str(e))
-        print(f"Download error: {str(e)}")
-        traceback.print_exc()
-    finally:
         # Remove from active downloads
         if download_id in active_downloads:
             logger.debug(f"Removing download ID {download_id} from active downloads")
@@ -506,6 +599,25 @@ def download():
             if not service_name:
                 logger.error(f"URL location '{url_parsed.netloc}' is not found in modules!")
                 return jsonify({'error': f'URL location "{url_parsed.netloc}" is not found in modules!'}), 400
+            
+            # Check if the module has required credentials
+            if service_name in orpheus_instance.settings.get('modules', {}):
+                module_settings = orpheus_instance.settings['modules'][service_name]
+                check_result = ModuleCheckerRegistry.check_module(service_name, module_settings)
+                
+                if not check_result:
+                    error_message = f"Missing required credentials for {service_name}. Please check your settings."
+                    if check_result.missing_fields:
+                        error_message = f"Missing required fields for {service_name}: {', '.join(check_result.missing_fields)}. Please check your settings."
+                    if check_result.errors:
+                        error_message += f" Errors: {', '.join(check_result.errors)}"
+                    
+                    logger.error(error_message)
+                    return jsonify({'error': error_message}), 400
+                
+                logger.debug(f"Module {service_name} credentials check passed")
+            else:
+                logger.warning(f"No settings found for module {service_name}")
                 
             media_to_download = {service_name: []}
             
@@ -604,31 +716,85 @@ def get_progress(download_id):
     logger.debug(f"Progress request for download ID: {download_id}")
     
     try:
-        # Get all events for this download
-        events = event_manager.get_events(download_id)
-        logger.debug(f"Found {len(events)} events for download ID: {download_id}")
+        # Initialize response data
+        response_data = {
+            'status': 'unknown',
+            'progress': 0,
+            'messages': []
+        }
         
-        # Get the latest progress event
-        progress_events = [e for e in events if e.event_type == EventType.PROGRESS]
-        progress = progress_events[-1].data["progress"] if progress_events else 0
+        # Check if download exists in active_downloads
+        if download_id in active_downloads:
+            # Get all events for this download
+            events = event_manager.get_events(download_id)
+            logger.debug(f"Found {len(events)} events for download ID: {download_id}")
+            
+            # Get the latest progress event
+            progress_events = [e for e in events if e.event_type == EventType.PROGRESS]
+            if progress_events:
+                response_data['progress'] = progress_events[-1].data["progress"]
+            
+            # Get all messages
+            response_data['messages'] = [e.data["message"] for e in events if e.event_type == EventType.MESSAGE]
+            
+            # Get the latest status
+            status_events = [e for e in events if e.event_type == EventType.STATUS]
+            if status_events:
+                response_data['status'] = status_events[-1].data["status"]
+            
+            # Check for error events
+            error_events = [e for e in events if e.event_type == EventType.ERROR]
+            if error_events:
+                response_data['status'] = 'error'
+                # Add error messages if not already included
+                for error_event in error_events:
+                    error_msg = f"Error: {error_event.data['error']}"
+                    if error_msg not in response_data['messages']:
+                        response_data['messages'].append(error_msg)
+            
+            # Check for completion event
+            complete_events = [e for e in events if e.event_type == EventType.COMPLETE]
+            if complete_events:
+                response_data['status'] = 'completed'
+                response_data['progress'] = 100
+            
+            # If no events found and download is in active_downloads, it's still starting
+            if not events and response_data['status'] == 'unknown':
+                response_data['status'] = 'starting'
+                response_data['progress'] = 0
+                response_data['messages'] = ['Download is starting...']
+        else:
+            # Download is not in active_downloads, check if it was completed or failed
+            events = event_manager.get_events(download_id)
+            if events:
+                # Check for error events
+                error_events = [e for e in events if e.event_type == EventType.ERROR]
+                if error_events:
+                    response_data['status'] = 'error'
+                    response_data['messages'] = [f"Error: {e.data['error']}" for e in error_events]
+                # Check for completion event
+                elif any(e.event_type == EventType.COMPLETE for e in events):
+                    response_data['status'] = 'completed'
+                    response_data['progress'] = 100
+                else:
+                    # If we have events but no error or completion, mark as error
+                    response_data['status'] = 'error'
+                    response_data['messages'] = ['Download failed or was interrupted']
+            else:
+                # No events and not in active_downloads, mark as error
+                response_data['status'] = 'error'
+                response_data['messages'] = ['Download failed or was interrupted']
         
-        # Get all messages
-        messages = [e.data["message"] for e in events if e.event_type == EventType.MESSAGE]
+        logger.debug(f"Progress for download ID {download_id}: {response_data}")
         
-        # Get the latest status
-        status_events = [e for e in events if e.event_type == EventType.STATUS]
-        status = status_events[-1].data["status"] if status_events else "unknown"
-        
-        logger.debug(f"Progress for download ID {download_id}: {progress}%, Status: {status}, Messages: {len(messages)}")
-        
-        return jsonify({
-            'status': status,
-            'progress': progress,
-            'messages': messages
-        })
+        return jsonify(response_data)
     except Exception as e:
         logger.error(f"Error getting progress for download ID {download_id}: {str(e)}", exc_info=True)
-        return jsonify({'error': str(e)}), 500
+        return jsonify({
+            'status': 'error',
+            'progress': 0,
+            'messages': [f"Error retrieving progress: {str(e)}"]
+        }), 500
 
 @app.route('/queue')
 def queue():
@@ -739,6 +905,9 @@ def settings():
         flash('No modules are installed. Please install at least one module to use OrpheusDL.', 'warning')
         return render_template('no_modules.html')
     
+    # Check if settings editing is enabled
+    enable_editing = os.environ.get('ENABLE_EDITING', '').lower() == 'true'
+    
     # Ensure settings has all required sections
     if 'global' not in orpheus_instance.settings:
         orpheus_instance.settings['global'] = {}
@@ -767,13 +936,51 @@ def settings():
     if 'modules' not in orpheus_instance.settings:
         orpheus_instance.settings['modules'] = {}
     
+    # Create a backup of settings before saving
+    settings_backup_path = os.path.join(os.path.dirname(orpheus_instance.settings_location), 'settings.backup.json')
+    try:
+        with open(settings_backup_path, 'w') as f:
+            json.dump(orpheus_instance.settings, f, indent=4)
+    except Exception as e:
+        app.logger.error(f"Error creating settings backup: {str(e)}")
+    
     # Save the updated settings
-    with open(orpheus_instance.settings_location, 'w') as f:
-        json.dump(orpheus_instance.settings, f, indent=4)
+    try:
+        with open(orpheus_instance.settings_location, 'w') as f:
+            json.dump(orpheus_instance.settings, f, indent=4)
+    except Exception as e:
+        app.logger.error(f"Error saving settings: {str(e)}")
+        # Try to restore from backup if save failed
+        try:
+            if os.path.exists(settings_backup_path):
+                with open(settings_backup_path, 'r') as f:
+                    orpheus_instance.settings = json.load(f)
+        except Exception as backup_error:
+            app.logger.error(f"Error restoring settings from backup: {str(backup_error)}")
+    
+    # Check module credentials
+    module_status = {}
+    for module in orpheus_instance.module_list:
+        if module in orpheus_instance.settings.get('modules', {}):
+            module_settings = orpheus_instance.settings['modules'][module]
+            check_result = ModuleCheckerRegistry.check_module(module, module_settings)
+            module_status[module] = {
+                'is_valid': check_result.is_valid,
+                'missing_fields': check_result.missing_fields,
+                'errors': check_result.errors
+            }
+        else:
+            module_status[module] = {
+                'is_valid': False,
+                'missing_fields': ['No settings found'],
+                'errors': []
+            }
     
     return render_template('settings.html', 
                          settings=orpheus_instance.settings,
-                         modules=orpheus_instance.module_list)
+                         modules=orpheus_instance.module_list,
+                         enable_editing=enable_editing,
+                         module_status=module_status)
 
 @app.route('/error')
 def error():
@@ -789,7 +996,20 @@ def update_settings():
         if not orpheus_instance:
             return jsonify({'success': False, 'error': 'Orpheus instance not initialized'}), 500
 
+        # Check if settings editing is enabled
+        if os.environ.get('ENABLE_EDITING', '').lower() != 'true':
+            return jsonify({'success': False, 'error': 'Settings editing is disabled. Set ENABLE_EDITING=true to enable.'}), 403
+
         new_settings = request.get_json()
+        
+        # Create a backup of current settings before updating
+        settings_backup_path = os.path.join(os.path.dirname(orpheus_instance.settings_location), 'settings.backup.json')
+        try:
+            with open(settings_backup_path, 'w') as f:
+                json.dump(orpheus_instance.settings, f, indent=4)
+        except Exception as e:
+            app.logger.error(f"Error creating settings backup: {str(e)}")
+            return jsonify({'success': False, 'error': f'Error creating settings backup: {str(e)}'}), 500
         
         # Update the settings in the Orpheus instance
         # We need to do a deep merge instead of a simple update
@@ -803,8 +1023,18 @@ def update_settings():
         deep_merge(orpheus_instance.settings, new_settings)
         
         # Save settings to file
-        with open(orpheus_instance.settings_location, 'w') as f:
-            json.dump(orpheus_instance.settings, f, indent=4)
+        try:
+            with open(orpheus_instance.settings_location, 'w') as f:
+                json.dump(orpheus_instance.settings, f, indent=4)
+        except Exception as e:
+            # Try to restore from backup if save failed
+            try:
+                if os.path.exists(settings_backup_path):
+                    with open(settings_backup_path, 'r') as f:
+                        orpheus_instance.settings = json.load(f)
+            except Exception as backup_error:
+                app.logger.error(f"Error restoring settings from backup: {str(backup_error)}")
+            return jsonify({'success': False, 'error': f'Error saving settings: {str(e)}'}), 500
         
         return jsonify({'success': True})
     except Exception as e:
