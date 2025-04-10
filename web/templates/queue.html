@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+
+{% block title %}Download Queue - OrpheusDL{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold mb-8">Download Queue</h1>
+    
+    <!-- Active Downloads -->
+    <div class="mb-8">
+        <h2 class="text-xl font-semibold mb-4">Active Downloads</h2>
+        <div id="active-downloads" class="space-y-4">
+            <!-- Active downloads will be populated here -->
+            <div class="text-muted" id="no-active-downloads" style="display: none;">
+                No active downloads
+            </div>
+        </div>
+    </div>
+    
+    <!-- Queued Downloads -->
+    <div class="mb-8">
+        <h2 class="text-xl font-semibold mb-4">Queued Downloads</h2>
+        <div id="queued-downloads" class="space-y-4">
+            <!-- Queued downloads will be populated here -->
+            <div class="text-muted" id="no-queued-downloads" style="display: none;">
+                No queued downloads
+            </div>
+        </div>
+    </div>
+    
+    <!-- Completed Downloads -->
+    <div id="completed-downloads" class="mt-8">
+        <h2 class="text-xl font-semibold mb-4">Completed Downloads</h2>
+        <div class="space-y-4">
+            <!-- Completed downloads will be shown here temporarily -->
+            <div class="text-muted" id="no-completed-downloads" style="display: none;">
+                No completed downloads
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Download Item Template -->
+<template id="download-item-template">
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
+        <div class="flex items-center justify-between">
+            <div class="flex-1">
+                <h3 class="text-lg font-medium text-gray-900 dark:text-white truncate"></h3>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1"></p>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="w-32">
+                    <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full">
+                        <div class="progress-bar h-2 bg-blue-600 rounded-full" style="width: 0%"></div>
+                    </div>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1 text-right progress-text">0%</p>
+                </div>
+                <button class="cancel-btn text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<!-- Completed Download Template -->
+<template id="completed-download-template">
+    <div class="bg-green-50 dark:bg-green-900 rounded-lg shadow-md p-4 completed-download">
+        <div class="flex items-center justify-between">
+            <div class="flex-1">
+                <h3 class="text-lg font-medium text-green-800 dark:text-green-100 truncate"></h3>
+                <p class="text-sm text-green-600 dark:text-green-300 mt-1"></p>
+            </div>
+            <div class="flex items-center">
+                <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+        </div>
+    </div>
+</template>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const activeDownloadsContainer = document.getElementById('active-downloads');
+    const queuedDownloadsContainer = document.getElementById('queued-downloads');
+    const completedDownloadsContainer = document.getElementById('completed-downloads').querySelector('div');
+    const downloadTemplate = document.getElementById('download-item-template');
+    const completedTemplate = document.getElementById('completed-download-template');
+    
+    // No downloads messages
+    const noActiveDownloads = document.getElementById('no-active-downloads');
+    const noQueuedDownloads = document.getElementById('no-queued-downloads');
+    const noCompletedDownloads = document.getElementById('no-completed-downloads');
+    
+    // Track completed downloads to avoid duplicates
+    const completedDownloads = new Set();
+    
+    function formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+    
+    function formatTime(timestamp) {
+        return new Date(timestamp * 1000).toLocaleString();
+    }
+    
+    function createDownloadElement(download) {
+        const template = downloadTemplate.content.cloneNode(true);
+        const container = template.querySelector('div');
+        
+        // Set download title and info
+        const title = container.querySelector('h3');
+        title.textContent = download.filename || 'Unknown File';
+        
+        const info = container.querySelector('p');
+        info.textContent = `${formatBytes(download.size || 0)} • ${formatTime(download.timestamp)}`;
+        
+        // Set progress
+        const progressBar = container.querySelector('.progress-bar');
+        const progressText = container.querySelector('.progress-text');
+        const progress = download.progress || 0;
+        progressBar.style.width = `${progress}%`;
+        progressText.textContent = `${progress}%`;
+        
+        // Set up cancel button
+        const cancelBtn = container.querySelector('.cancel-btn');
+        cancelBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch(`/api/queue/${download.download_id}/cancel`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': csrfToken
+                    },
+                    credentials: 'same-origin'
+                });
+                if (!response.ok) throw new Error('Failed to cancel download');
+                updateQueue();
+            } catch (error) {
+                console.error('Error cancelling download:', error);
+            }
+        });
+        
+        return container;
+    }
+    
+    function showCompletedDownload(download) {
+        // Skip if already shown
+        if (completedDownloads.has(download.download_id)) {
+            return;
+        }
+        
+        // Mark as shown
+        completedDownloads.add(download.download_id);
+        
+        // Create completed download element
+        const template = completedTemplate.content.cloneNode(true);
+        const container = template.querySelector('div');
+        
+        // Set download title and info
+        const title = container.querySelector('h3');
+        title.textContent = download.filename || 'Unknown File';
+        
+        const info = container.querySelector('p');
+        info.textContent = `Completed at ${formatTime(download.timestamp)}`;
+        
+        // Add to completed downloads container
+        completedDownloadsContainer.appendChild(container);
+        
+        // Remove after 10 seconds if it's a temporary notification
+        if (download.status === 'completed' && download.timestamp < (Date.now() / 1000) - 10) {
+            setTimeout(() => {
+                if (container.parentNode) {
+                    container.parentNode.removeChild(container);
+                }
+            }, 10000);
+        }
+    }
+    
+    async function updateQueue() {
+        try {
+            const response = await fetch('/api/queue', {
+                headers: {
+                    'X-CSRFToken': csrfToken
+                },
+                credentials: 'same-origin'
+            });
+            const data = await response.json();
+            
+            // Update active downloads
+            activeDownloadsContainer.innerHTML = '';
+            if (data.active && data.active.length > 0) {
+                data.active.forEach(download => {
+                    activeDownloadsContainer.appendChild(createDownloadElement(download));
+                });
+                noActiveDownloads.style.display = 'none';
+            } else {
+                noActiveDownloads.style.display = 'block';
+            }
+            
+            // Update queued downloads
+            queuedDownloadsContainer.innerHTML = '';
+            if (data.queued && data.queued.length > 0) {
+                data.queued.forEach(download => {
+                    queuedDownloadsContainer.appendChild(createDownloadElement(download));
+                });
+                noQueuedDownloads.style.display = 'none';
+            } else {
+                noQueuedDownloads.style.display = 'block';
+            }
+            
+            // Update completed downloads
+            completedDownloadsContainer.innerHTML = '';
+            if (data.completed && data.completed.length > 0) {
+                data.completed.forEach(download => {
+                    showCompletedDownload(download);
+                });
+                noCompletedDownloads.style.display = 'none';
+            } else {
+                noCompletedDownloads.style.display = 'block';
+            }
+        } catch (error) {
+            console.error('Error fetching queue:', error);
+        }
+    }
+    
+    // Update queue every 2 seconds
+    updateQueue();
+    setInterval(updateQueue, 2000);
+});
+</script>
+{% endblock %} 

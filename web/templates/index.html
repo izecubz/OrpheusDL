@@ -12,7 +12,14 @@
                     {{ form.csrf_token }}
                     <div class="mb-3">
                         <label for="url" class="form-label">Music URL</label>
-                        {{ form.url(class="form-control", placeholder="Enter music URL (track, album, playlist, or artist)") }}
+                        <div id="url-inputs">
+                            <div class="input-group mb-2">
+                                {{ form.url(class="form-control", placeholder="Enter music URL (track, album, playlist, or artist)") }}
+                                <button type="button" class="btn btn-outline-secondary" id="addUrlBtn">
+                                    <i class="fas fa-plus"></i>
+                                </button>
+                            </div>
+                        </div>
                         {% if form.url.errors %}
                             <div class="invalid-feedback d-block">
                                 {% for error in form.url.errors %}
@@ -109,115 +116,153 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const downloadForm = document.getElementById('downloadForm');
+    const downloadButton = document.getElementById('downloadButton');
     const downloadProgress = document.getElementById('downloadProgress');
     const progressBar = document.getElementById('progressBar');
     const logMessages = document.getElementById('logMessages');
-    const downloadButton = document.getElementById('downloadButton');
+    const urlInputs = document.getElementById('url-inputs');
+    const addUrlBtn = document.getElementById('addUrlBtn');
     
-    let currentDownloadId = null;
-    let progressInterval = null;
+    // Get CSRF token from the form
+    const csrfToken = document.querySelector('input[name="csrf_token"]').value;
+    
+    // Add URL input field
+    addUrlBtn.addEventListener('click', function() {
+        const newInputGroup = document.createElement('div');
+        newInputGroup.className = 'input-group mb-2';
+        newInputGroup.innerHTML = `
+            <input type="text" name="url" class="form-control" placeholder="Enter music URL (track, album, playlist, or artist)">
+            <button type="button" class="btn btn-outline-danger remove-url-btn">
+                <i class="fas fa-minus"></i>
+            </button>
+        `;
+        urlInputs.appendChild(newInputGroup);
+        
+        // Add event listener to remove button
+        newInputGroup.querySelector('.remove-url-btn').addEventListener('click', function() {
+            urlInputs.removeChild(newInputGroup);
+        });
+    });
     
     downloadForm.addEventListener('submit', function(e) {
         e.preventDefault();
         
-        // Disable the download button
-        downloadButton.disabled = true;
-        downloadButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Starting Download...';
-        
-        // Show the progress section
+        // Show progress section
         downloadProgress.style.display = 'block';
-        logMessages.innerHTML = '';
+        
+        // Reset progress
         progressBar.style.width = '0%';
         progressBar.textContent = '0%';
+        logMessages.innerHTML = '';
         
-        // Submit the form via AJAX
-        fetch('{{ url_for("download") }}', {
-            method: 'POST',
-            body: new FormData(downloadForm),
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest'
-            }
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.error) {
-                // Show error
-                logMessages.innerHTML += `<div class="text-danger">Error: ${data.error}</div>`;
-                downloadButton.disabled = false;
-                downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
-                return;
-            }
-            
-            // Start tracking progress
-            currentDownloadId = data.download_id;
-            startProgressTracking();
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            logMessages.innerHTML += `<div class="text-danger">Error: ${error.message}</div>`;
-            downloadButton.disabled = false;
-            downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
-        });
-    });
-    
-    function startProgressTracking() {
-        // Clear any existing interval
-        if (progressInterval) {
-            clearInterval(progressInterval);
+        // Get all URL inputs
+        const urlInputs = document.querySelectorAll('input[name="url"]');
+        const urls = Array.from(urlInputs).map(input => input.value).filter(url => url.trim() !== '');
+        
+        if (urls.length === 0) {
+            logMessages.innerHTML += `<div class="text-danger">Error: Please enter at least one URL</div>`;
+            return;
         }
         
-        // Start a new interval to check progress
-        progressInterval = setInterval(function() {
-            if (!currentDownloadId) return;
+        // Get form data
+        const formData = new FormData(downloadForm);
+        
+        // Process each URL
+        let processedCount = 0;
+        let successCount = 0;
+        
+        urls.forEach((url, index) => {
+            // Create a new FormData for each URL
+            const urlFormData = new FormData();
+            for (const [key, value] of formData.entries()) {
+                if (key === 'url') {
+                    urlFormData.append(key, url);
+                } else {
+                    urlFormData.append(key, value);
+                }
+            }
             
-            fetch(`/progress/${currentDownloadId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        logMessages.innerHTML += `<div class="text-danger">Error: ${data.error}</div>`;
-                        clearInterval(progressInterval);
-                        downloadButton.disabled = false;
-                        downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
-                        return;
-                    }
+            // Send AJAX request for each URL
+            fetch('/download', {
+                method: 'POST',
+                body: urlFormData,
+                headers: {
+                    'X-CSRFToken': csrfToken
+                },
+                credentials: 'same-origin'  // Include cookies in the request
+            })
+            .then(response => response.json())
+            .then(data => {
+                processedCount++;
+                
+                if (data.error) {
+                    logMessages.innerHTML += `<div class="text-danger">Error for URL ${index + 1}: ${data.error}</div>`;
+                } else if (data.success) {
+                    successCount++;
+                    logMessages.innerHTML += `<div class="text-success">URL ${index + 1} added to queue! Download ID: ${data.download_id}</div>`;
                     
-                    // Update progress bar
-                    progressBar.style.width = `${data.progress}%`;
-                    progressBar.textContent = `${data.progress}%`;
-                    
-                    // Update log messages
-                    if (data.messages && data.messages.length > 0) {
-                        logMessages.innerHTML = '';
-                        data.messages.forEach(message => {
-                            logMessages.innerHTML += `<div>${message}</div>`;
-                        });
-                        // Scroll to bottom
-                        logMessages.scrollTop = logMessages.scrollHeight;
+                    // Start polling for progress of the last added download
+                    if (processedCount === urls.length) {
+                        const downloadId = data.download_id;
+                        let progressInterval = setInterval(() => {
+                            fetch(`/progress/${downloadId}`, {
+                                headers: {
+                                    'X-CSRFToken': csrfToken
+                                },
+                                credentials: 'same-origin'
+                            })
+                                .then(response => response.json())
+                                .then(progressData => {
+                                    // Update progress bar
+                                    progressBar.style.width = `${progressData.progress}%`;
+                                    progressBar.textContent = `${progressData.progress}%`;
+                                    
+                                    // Add new log messages
+                                    if (progressData.messages && progressData.messages.length > 0) {
+                                        progressData.messages.forEach(message => {
+                                            logMessages.innerHTML += `<div>${message}</div>`;
+                                        });
+                                        logMessages.scrollTop = logMessages.scrollHeight;
+                                    }
+                                    
+                                    // Check if download is completed or errored
+                                    if (progressData.status === 'completed' || progressData.status === 'error' || progressData.status === 'cancelled') {
+                                        clearInterval(progressInterval);
+                                        
+                                        if (progressData.status === 'completed') {
+                                            logMessages.innerHTML += `<div class="text-success">Download completed!</div>`;
+                                        } else if (progressData.status === 'error') {
+                                            logMessages.innerHTML += `<div class="text-danger">Download failed!</div>`;
+                                        } else if (progressData.status === 'cancelled') {
+                                            logMessages.innerHTML += `<div class="text-warning">Download cancelled!</div>`;
+                                        }
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('Error fetching progress:', error);
+                                    clearInterval(progressInterval);
+                                });
+                        }, 1000);
                     }
-                    
-                    // Check if download is completed or errored
-                    if (data.status === 'completed' || data.status === 'error') {
-                        clearInterval(progressInterval);
-                        downloadButton.disabled = false;
-                        downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
-                        
-                        if (data.status === 'completed') {
-                            progressBar.classList.remove('progress-bar-animated');
-                            progressBar.classList.add('bg-success');
-                        } else {
-                            progressBar.classList.remove('progress-bar-animated');
-                            progressBar.classList.add('bg-danger');
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error fetching progress:', error);
-                    clearInterval(progressInterval);
-                    downloadButton.disabled = false;
-                    downloadButton.innerHTML = '<i class="fas fa-download"></i> Start Download';
-                });
-        }, 1000); // Check every second
-    }
+                }
+                
+                // If all URLs have been processed, show summary
+                if (processedCount === urls.length) {
+                    logMessages.innerHTML += `<div class="text-info">Added ${successCount} of ${urls.length} URLs to the queue.</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                logMessages.innerHTML += `<div class="text-danger">Error for URL ${index + 1}: ${error.message}</div>`;
+                processedCount++;
+                
+                // If all URLs have been processed, show summary
+                if (processedCount === urls.length) {
+                    logMessages.innerHTML += `<div class="text-info">Added ${successCount} of ${urls.length} URLs to the queue.</div>`;
+                }
+            });
+        });
+    });
 });
 </script>
 {% endblock %} 

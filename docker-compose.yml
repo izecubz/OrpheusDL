@@ -1,0 +1,42 @@
+version: '3'
+
+services:
+  orpheusdl-web:
+    build: .
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./config:/app/config:rw
+      - ./extensions:/app/extensions:rw
+      - ./utils:/app/utils:rw
+      - ./orpheus:/app/orpheus:rw
+      - ./web:/app/web:rw
+      - ./modules:/app/modules:rw
+      - ./logs:/app/logs
+      - ./downloads:/app/downloads
+    environment:
+      - FLASK_APP=web.run
+      - FLASK_ENV=production
+      - FLASK_DEBUG=0
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app
+      - GUNICORN_CMD_ARGS="--log-level info"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

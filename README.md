@@ -241,3 +241,67 @@ Project Link: [Orpheus Public GitHub Repository](https://github.com/OrfiTeam/Orp
 ## Acknowledgements
 * Chimera by Aesir - the inspiration to the project
 * [Icon modified from a freepik image](https://www.freepik.com/)
+
+# OrpheusDL Web Interface
+
+A web interface for OrpheusDL, a music downloader.
+
+## Docker Setup
+
+The application is containerized using Docker for easy deployment. The downloads folder is mapped to a volume so that downloaded files can be accessed from outside the container.
+
+### Prerequisites
+
+- Docker
+- Docker Compose
+
+### Running with Docker
+
+1. Clone the repository:
+   ```
+   git clone https://github.com/yourusername/OrpheusDL-WEB.git
+   cd OrpheusDL-WEB
+   ```
+
+2. Create the downloads directory:
+   ```
+   mkdir -p downloads
+   ```
+
+3. Build and start the container:
+   ```
+   docker-compose up -d
+   ```
+
+4. Access the web interface at http://localhost:5000
+
+### Accessing Downloaded Files
+
+All downloaded files will be stored in the `downloads` directory in the project root. This directory is mapped to `/app/downloads` inside the container.
+
+## Manual Setup
+
+If you prefer to run the application without Docker:
+
+1. Install the required dependencies:
+   ```
+   pip install -r requirements.txt
+   ```
+
+2. Run the application:
+   ```
+   python web/run.py
+   ```
+
+3. Access the web interface at http://localhost:5000
+
+## Features
+
+- Download music from various sources
+- Queue management
+- Download progress tracking
+- Settings configuration
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
